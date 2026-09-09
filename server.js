@@ -7,7 +7,8 @@ import db from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";   
 import lawyerRoutes from "./routes/lawyerRoutes.js"; 
-
+import paymentRoutes from "./routes/paymentRoutes.js";
+import consultationRoutes from "./routes/consultationRoutes.js";
 
 dotenv.config();
 
@@ -24,6 +25,8 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/lawyers", lawyerRoutes);
+app.use("/api/consultations", consultationRoutes);
+app.use("/api/payments", paymentRoutes);
 
 db.connect()
   .then(() => {
