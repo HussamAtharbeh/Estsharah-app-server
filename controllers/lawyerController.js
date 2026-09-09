@@ -1,32 +1,34 @@
 import db from "../config/db.js";
 import { AppError } from "../utils/AppError.js";
 
-const PUBLIC_LAWYER_FIELDS = `
-  l.id,
-  l.user_id,
-  u.name,
-  u.city,
-  u.email,
-  l.specialty,
-  l.specialties,
-  l.experience,
-  l.bio,
-  l.image,
-  l.response_time,
-  l.prices,
-  l.consultation_types,
-  l.available,
-  l.verified,
-  l.rating_avg,
-  l.reviews_count,
-  l.cases_count,
-  l.created_at,
-  (
-    SELECT MIN(p.value::int)
-    FROM jsonb_each_text(l.prices) AS p
-    WHERE p.key = ANY(l.consultation_types)
-  ) AS min_price
-`;
+
+function calculateMinPrice(prices, consultationTypes) {
+  if (!prices || !consultationTypes || consultationTypes.length === 0) {
+    return null;
+  }
+
+  let minPrice = null;
+
+  for (const type of consultationTypes) {
+    const price = Number(prices[type]);
+
+    if (!price) continue; 
+
+    if (minPrice === null || price < minPrice) {
+      minPrice = price;
+    }
+  }
+
+  return minPrice;
+}
+
+
+function attachMinPrice(lawyer) {
+  return {
+    ...lawyer,
+    min_price: calculateMinPrice(lawyer.prices, lawyer.consultation_types),
+  };
+}
 
 async function getLawyerIdOf(userId) {
   const result = await db.query(
@@ -41,64 +43,70 @@ async function getLawyerIdOf(userId) {
   return result.rows[0].id;
 }
 
+const PUBLIC_LAWYER_FIELDS = `
+  l.id, l.user_id, u.name, u.city, u.email,
+  l.specialty, l.specialties, l.experience, l.bio, l.image,
+  l.response_time, l.prices, l.consultation_types,
+  l.available, l.verified, l.rating_avg, l.reviews_count,
+  l.cases_count, l.created_at
+`;
+
 export async function getAllLawyers(req, res) {
   const { search, specialization, city, sortBy, availableOnly } = req.query;
 
-  let query = `
-    SELECT ${PUBLIC_LAWYER_FIELDS}
-    FROM lawyers l
-    JOIN users u ON l.user_id = u.id
-    WHERE u.status = 'active'
-      AND l.verified = TRUE
-  `;
-
+  const conditions = ["u.status = 'active'", "l.verified = TRUE"];
   const values = [];
 
   if (search) {
     values.push(`%${search}%`);
+    const placeholder = `$${values.length}`;
 
-    query += `
-      AND (
-        u.name ILIKE $${values.length}
-        OR l.specialty ILIKE $${values.length}
+    conditions.push(`
+      (u.name ILIKE ${placeholder}
+        OR l.specialty ILIKE ${placeholder}
         OR EXISTS (
-          SELECT 1
-          FROM unnest(l.specialties) AS s
-          WHERE s ILIKE $${values.length}
-        )
-      )
-    `;
+          SELECT 1 FROM unnest(l.specialties) AS s
+          WHERE s ILIKE ${placeholder}
+        ))
+    `);
   }
 
   if (specialization) {
     values.push(specialization);
-    query += ` AND l.specialty = $${values.length}`;
+    conditions.push(`l.specialty = $${values.length}`);
   }
 
   if (city) {
     values.push(city);
-    query += ` AND u.city = $${values.length}`;
+    conditions.push(`u.city = $${values.length}`);
   }
 
   if (availableOnly === "true") {
-    query += " AND l.available = TRUE";
+    conditions.push("l.available = TRUE");
   }
 
-  let orderBy = "l.rating_avg DESC";
-
-  if (sortBy === "price_asc") {
-    orderBy = "min_price ASC NULLS LAST";
-  }
-
-  if (sortBy === "price_desc") {
-    orderBy = "min_price DESC NULLS LAST";
-  }
-
-  query += ` ORDER BY ${orderBy}`;
+  const query = `
+    SELECT ${PUBLIC_LAWYER_FIELDS}
+    FROM lawyers l
+    JOIN users u ON l.user_id = u.id
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY l.rating_avg DESC
+  `;
 
   const result = await db.query(query, values);
 
-  res.json(result.rows);
+
+  let lawyers = result.rows.map(attachMinPrice);
+
+  if (sortBy === "price_asc") {
+    lawyers.sort((a, b) => (a.min_price ?? Infinity) - (b.min_price ?? Infinity));
+  }
+
+  if (sortBy === "price_desc") {
+    lawyers.sort((a, b) => (b.min_price ?? -Infinity) - (a.min_price ?? -Infinity));
+  }
+
+  res.json(lawyers);
 }
 
 export async function getLawyerById(req, res) {
@@ -107,9 +115,7 @@ export async function getLawyerById(req, res) {
     SELECT ${PUBLIC_LAWYER_FIELDS}
     FROM lawyers l
     JOIN users u ON l.user_id = u.id
-    WHERE l.id = $1
-      AND u.status = 'active'
-      AND l.verified = TRUE
+    WHERE l.id = $1 AND u.status = 'active' AND l.verified = TRUE
     `,
     [req.params.id]
   );
@@ -118,17 +124,14 @@ export async function getLawyerById(req, res) {
     throw new AppError("المحامي غير موجود", 404);
   }
 
-  res.json(result.rows[0]);
+  res.json(attachMinPrice(result.rows[0]));
 }
+
 
 export async function getMyLawyerProfile(req, res) {
   const result = await db.query(
     `
-    SELECT
-      ${PUBLIC_LAWYER_FIELDS},
-      u.phone,
-      l.bar_number,
-      l.document_url
+    SELECT ${PUBLIC_LAWYER_FIELDS}, u.phone, l.bar_number, l.document_url
     FROM lawyers l
     JOIN users u ON l.user_id = u.id
     WHERE l.user_id = $1
@@ -140,182 +143,153 @@ export async function getMyLawyerProfile(req, res) {
     throw new AppError("لم يتم العثور على ملف المحامي", 404);
   }
 
-  res.json(result.rows[0]);
+  res.json(attachMinPrice(result.rows[0]));
 }
+
 
 export async function updateMyLawyerProfile(req, res) {
   const {
-    name,
-    city,
-    specialty,
-    experience,
-    bio,
-    prices,
-    specialties,
-    consultationTypes,
-    available,
-    image,
-    responseTime
+    name, city, specialty, experience, bio,
+    prices, specialties, consultationTypes,
+    available, image, responseTime,
   } = req.body;
 
   if (Array.isArray(consultationTypes) && prices) {
-    const missing = consultationTypes.filter(
-      type => !(Number(prices[type]) > 0)
-    );
-
-    if (missing.length > 0) {
-      throw new AppError(
-        "يجب تحديد سعر لكل نوع استشارة مفعّل",
-        400
-      );
+    for (const type of consultationTypes) {
+      if (!(Number(prices[type]) > 0)) {
+        throw new AppError("يجب تحديد سعر لكل نوع استشارة مفعّل", 400);
+      }
     }
   }
 
-  await db.query(
-    `
-    UPDATE users
-    SET
-      name = COALESCE($1, name),
-      city = COALESCE($2, city)
-    WHERE id = $3
-    `,
-    [
-      name ?? null,
-      city ?? null,
-      req.user.id
-    ]
+  const current = await db.query(
+    `SELECT u.name, u.city, l.specialty, l.experience, l.bio, l.prices,
+            l.specialties, l.consultation_types, l.available, l.image, l.response_time
+     FROM lawyers l
+     JOIN users u ON l.user_id = u.id
+     WHERE l.user_id = $1`,
+    [req.user.id]
   );
 
-  const result = await db.query(
-    `
-    UPDATE lawyers
-    SET
-      specialty = COALESCE($1, specialty),
-      experience = COALESCE($2, experience),
-      bio = COALESCE($3, bio),
-      prices = COALESCE($4::jsonb, prices),
-      specialties = COALESCE($5::text[], specialties),
-      consultation_types = COALESCE($6::text[], consultation_types),
-      available = COALESCE($7, available),
-      image = COALESCE($8, image),
-      response_time = COALESCE($9, response_time)
-    WHERE user_id = $10
-    RETURNING id
-    `,
-    [
-      specialty ?? null,
-      experience === undefined ? null : Number(experience),
-      bio ?? null,
-      prices ? JSON.stringify(prices) : null,
-      specialties ?? null,
-      consultationTypes ?? null,
-      available ?? null,
-      image ?? null,
-      responseTime ?? null,
-      req.user.id
-    ]
-  );
-
-  if (result.rows.length === 0) {
+  if (current.rows.length === 0) {
     throw new AppError("لم يتم العثور على ملف المحامي", 404);
   }
+
+  const existing = current.rows[0];
+
+  
+  const updatedName = name ?? existing.name;
+  const updatedCity = city ?? existing.city;
+  const updatedSpecialty = specialty ?? existing.specialty;
+  const updatedExperience = experience !== undefined ? Number(experience) : existing.experience;
+  const updatedBio = bio ?? existing.bio;
+  const updatedPrices = prices ?? existing.prices;
+  const updatedSpecialties = specialties ?? existing.specialties;
+  const updatedConsultationTypes = consultationTypes ?? existing.consultation_types;
+  const updatedAvailable = available ?? existing.available;
+  const updatedImage = image ?? existing.image;
+  const updatedResponseTime = responseTime ?? existing.response_time;
+
+  await db.query(
+    "UPDATE users SET name = $1, city = $2 WHERE id = $3",
+    [updatedName, updatedCity, req.user.id]
+  );
+
+  await db.query(
+    `UPDATE lawyers SET
+       specialty = $1,
+       experience = $2,
+       bio = $3,
+       prices = $4,
+       specialties = $5,
+       consultation_types = $6,
+       available = $7,
+       image = $8,
+       response_time = $9
+     WHERE user_id = $10`,
+    [
+      updatedSpecialty,
+      updatedExperience,
+      updatedBio,
+      JSON.stringify(updatedPrices),
+      updatedSpecialties,
+      updatedConsultationTypes,
+      updatedAvailable,
+      updatedImage,
+      updatedResponseTime,
+      req.user.id,
+    ]
+  );
 
   return getMyLawyerProfile(req, res);
 }
 
+
 export async function getMyLawyerStats(req, res) {
   const lawyerId = await getLawyerIdOf(req.user.id);
 
-  const result = await db.query(
-    `
-    SELECT
-      l.cases_count,
-      l.rating_avg,
-
-      (
-        SELECT COUNT(*)::int
-        FROM consultations c
-        WHERE c.lawyer_id = l.id
-          AND c.created_at >= date_trunc('month', NOW())
-      ) AS month_consultations,
-
-      (
-        SELECT COALESCE(SUM(c.price), 0)::int
-        FROM consultations c
-        WHERE c.lawyer_id = l.id
-          AND c.status = 'completed'
-          AND c.created_at >= date_trunc('month', NOW())
-      ) AS month_earnings,
-
-      (
-        SELECT COUNT(*)::int
-        FROM consultations c
-        WHERE c.lawyer_id = l.id
-          AND c.status = 'pending'
-      ) AS pending_orders
-
-    FROM lawyers l
-    WHERE l.id = $1
-    `,
+  const lawyerInfo = await db.query(
+    "SELECT cases_count, rating_avg FROM lawyers WHERE id = $1",
     [lawyerId]
   );
 
-  res.json(result.rows[0]);
+  const monthConsultations = await db.query(
+    `SELECT COUNT(*)::int AS count FROM consultations
+     WHERE lawyer_id = $1 AND created_at >= date_trunc('month', NOW())`,
+    [lawyerId]
+  );
+
+  const monthEarnings = await db.query(
+    `SELECT COALESCE(SUM(price), 0)::int AS total FROM consultations
+     WHERE lawyer_id = $1 AND status = 'completed'
+       AND created_at >= date_trunc('month', NOW())`,
+    [lawyerId]
+  );
+
+  const pendingOrders = await db.query(
+    "SELECT COUNT(*)::int AS count FROM consultations WHERE lawyer_id = $1 AND status = 'pending'",
+    [lawyerId]
+  );
+
+  res.json({
+    cases_count: lawyerInfo.rows[0].cases_count,
+    rating_avg: lawyerInfo.rows[0].rating_avg,
+    month_consultations: monthConsultations.rows[0].count,
+    month_earnings: monthEarnings.rows[0].total,
+    pending_orders: pendingOrders.rows[0].count,
+  });
 }
+
 
 export async function getAllLawyersAdmin(req, res) {
   const result = await db.query(
-    `
-    SELECT
-      l.id,
-      l.user_id,
-      u.name,
-      u.email,
-      u.city,
-      u.status,
-      l.specialty,
-      l.bar_number,
-      l.document_url,
-      l.verified,
-      l.created_at
-    FROM lawyers l
-    JOIN users u ON l.user_id = u.id
-    ORDER BY l.created_at DESC
-    `
+    `SELECT l.id, l.user_id, u.name, u.email, u.city, u.status,
+            l.specialty, l.bar_number, l.document_url, l.verified, l.created_at
+     FROM lawyers l
+     JOIN users u ON l.user_id = u.id
+     ORDER BY l.created_at DESC`
   );
 
   res.json(result.rows);
 }
 
-export async function verifyLawyer(req, res) {
-  const result = await db.query(
-    `
-    UPDATE lawyers
-    SET verified = TRUE
-    WHERE id = $1
-    RETURNING id, user_id, verified
-    `,
-    [req.params.id]
-  );
-
-  if (result.rows.length === 0) {
-    throw new AppError("المحامي غير موجود", 404);
-  }
-
-  await db.query(
-    "UPDATE users SET status = 'active' WHERE id = $1",
-    [result.rows[0].user_id]
-  );
-
-  res.json({
-    ...result.rows[0],
-    message: "تم اعتماد حساب المحامي"
-  });
-}
-
-export async function suspendLawyer(req, res) {
+async function getLawyerUserIdOrFail(lawyerId) {
   const result = await db.query(
     "SELECT user_id FROM lawyers WHERE id = $1",
+    [lawyerId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError("المحامي غير موجود", 404);
+  }
+
+  return result.rows[0].user_id;
+}
+
+
+export async function verifyLawyer(req, res) {
+  const result = await db.query(
+    "UPDATE lawyers SET verified = TRUE WHERE id = $1 RETURNING id, user_id, verified",
     [req.params.id]
   );
 
@@ -323,60 +297,48 @@ export async function suspendLawyer(req, res) {
     throw new AppError("المحامي غير موجود", 404);
   }
 
-  await db.query(
-    "UPDATE users SET status = 'suspended' WHERE id = $1",
-    [result.rows[0].user_id]
-  );
+  await db.query("UPDATE users SET status = 'active' WHERE id = $1", [
+    result.rows[0].user_id,
+  ]);
+
+  res.json({ ...result.rows[0], message: "تم اعتماد حساب المحامي" });
+}
+
+
+export async function suspendLawyer(req, res) {
+  const userId = await getLawyerUserIdOrFail(req.params.id);
+
+  await db.query("UPDATE users SET status = 'suspended' WHERE id = $1", [userId]);
 
   res.json({
     id: Number(req.params.id),
     status: "suspended",
-    message: "تم تعليق حساب المحامي"
+    message: "تم تعليق حساب المحامي",
   });
 }
 
+
 export async function activateLawyer(req, res) {
-  const result = await db.query(
-    "SELECT user_id FROM lawyers WHERE id = $1",
-    [req.params.id]
-  );
+  const userId = await getLawyerUserIdOrFail(req.params.id);
 
-  if (result.rows.length === 0) {
-    throw new AppError("المحامي غير موجود", 404);
-  }
-
-  await db.query(
-    "UPDATE users SET status = 'active' WHERE id = $1",
-    [result.rows[0].user_id]
-  );
+  await db.query("UPDATE users SET status = 'active' WHERE id = $1", [userId]);
 
   res.json({
     id: Number(req.params.id),
     status: "active",
-    message: "تم تفعيل حساب المحامي"
+    message: "تم تفعيل حساب المحامي",
   });
 }
 
+
 export async function deleteLawyer(req, res) {
-  const result = await db.query(
-    "SELECT user_id FROM lawyers WHERE id = $1",
-    [req.params.id]
-  );
+  const userId = await getLawyerUserIdOrFail(req.params.id);
 
-  if (result.rows.length === 0) {
-    throw new AppError("المحامي غير موجود", 404);
-  }
-
-  await db.query(
-    "DELETE FROM users WHERE id = $1",
-    [result.rows[0].user_id]
-  );
+  await db.query("DELETE FROM users WHERE id = $1", [userId]);
 
   res.json({
-    deleted: {
-      id: Number(req.params.id)
-    },
-    message: "تم حذف حساب المحامي"
+    deleted: { id: Number(req.params.id) },
+    message: "تم حذف حساب المحامي",
   });
 }
 

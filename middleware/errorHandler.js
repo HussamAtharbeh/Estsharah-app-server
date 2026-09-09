@@ -11,14 +11,15 @@ export function errorHandler(err, req, res, next) {
     });
   }
 
-  const statusCode = err.statusCode || 500;
-  const message = err.isOperational
-    ? err.message
-    : "حدث خطأ في الخادم";
-
-  if (!err.isOperational) {
-    console.error(err);
+  if (err.isOperational) {
+    return res.status(err.statusCode || 500).json({
+      message: err.message
+    });
   }
 
-  res.status(statusCode).json({ message });
+  console.error(err);
+
+  res.status(500).json({
+    message: "حدث خطأ في الخادم"
+  });
 }
