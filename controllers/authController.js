@@ -51,49 +51,95 @@ export async function signupClient(req, res) {
 
 export async function signupLawyer(req, res) {
   const {
-    fullName, email, password, phone,
-    barNumber, specialization, experience, city, documentUrl,
+    fullName,
+    email,
+    password,
+    phone,
+    barNumber,
+    specialization,
+    experience,
+    city,
   } = req.body;
 
-  if (!fullName || !email || !password || !barNumber || !specialization || !city) {
+  if (
+    !fullName ||
+    !email ||
+    !password ||
+    !barNumber ||
+    !specialization ||
+    !city
+  ) {
     throw new AppError("جميع الحقول مطلوبة", 400);
   }
 
-  if (password.length < 6) {
-    throw new AppError("كلمة المرور يجب أن تكون 6 أحرف على الأقل", 400);
+  if (!password || password.length < 6) {
+    throw new AppError(
+      "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+      400
+    );
   }
 
   if (await emailIsTaken(email)) {
-    throw new AppError("يوجد حساب مسجل بهذا البريد الإلكتروني", 400);
+    throw new AppError(
+      "يوجد حساب مسجل بهذا البريد الإلكتروني",
+      400
+    );
   }
 
-  const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+  if (!req.file) {
+    throw new AppError(
+      "يرجى رفع صورة الهوية أو بطاقة النقابة",
+      400
+    );
+  }
 
-  
+  const hashedPassword = await bcrypt.hash(
+    password,
+    SALT_ROUNDS
+  );
+
   const userResult = await db.query(
-    `INSERT INTO users (name, email, phone, city, password, role)
-     VALUES ($1, $2, $3, $4, $5, 'lawyer')
+    `INSERT INTO users
+      (name, email, phone, city, password, role)
+     VALUES
+      ($1, $2, $3, $4, $5, 'lawyer')
      RETURNING id, name, email, phone, city, role, status, created_at`,
-    [fullName, email, phone || null, city, hashedPassword]
+    [
+      fullName,
+      email,
+      phone || null,
+      city,
+      hashedPassword,
+    ]
   );
 
   const user = userResult.rows[0];
 
+  const documentUrl = `/uploads/lawyers/${req.file.filename}`;
+
   const lawyerResult = await db.query(
-    `INSERT INTO lawyers (user_id, specialty, experience, bar_number, document_url, verified)
-     VALUES ($1, $2, $3, $4, $5, FALSE)
+    `INSERT INTO lawyers
+      (user_id, specialty, experience, bar_number, document_url, verified)
+     VALUES
+      ($1, $2, $3, $4, $5, FALSE)
      RETURNING *`,
-    [user.id, specialization, Number(experience) || 0, barNumber, documentUrl || null]
+    [
+      user.id,
+      specialization,
+      Number(experience) || 0,
+      barNumber,
+      documentUrl,
+    ]
   );
 
   res.status(201).json({
     user,
     lawyer: lawyerResult.rows[0],
     token: generateToken(user),
-    message: "تم إرسال طلب التسجيل. سيتم مراجعة الوثائق من الإدارة قبل ظهور ملفك للعملاء.",
+    message:
+      "تم إرسال طلب التسجيل. سيتم مراجعة الوثائق من الإدارة قبل ظهور ملفك للعملاء.",
   });
 }
-
 
 export async function login(req, res) {
   const { email, password } = req.body;

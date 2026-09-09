@@ -11,13 +11,16 @@ import {
   sendMeetingLink,
   sendOfficeLocation,
   rateConsultation,
+  getConsultationsCount,
 } from "../controllers/consultationController.js";
+
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import { roleMiddleware } from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
+router.get("/count", asyncHandler(getConsultationsCount));
 router.use(authMiddleware);
 
 const clientOnly = roleMiddleware("client");

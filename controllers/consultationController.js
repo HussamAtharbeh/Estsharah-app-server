@@ -246,3 +246,15 @@ export async function rateConsultation(req, res) {
 
   res.status(201).json(result.rows[0]);
 }
+
+export async function getConsultationsCount(req, res) {
+  const result = await db.query(
+    `SELECT COUNT(*) 
+     FROM consultations
+     WHERE status = 'completed'`
+  );
+
+  res.json({
+    count: result.rows[0].count
+  });
+}

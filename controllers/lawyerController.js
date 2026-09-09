@@ -341,5 +341,17 @@ export async function deleteLawyer(req, res) {
     message: "تم حذف حساب المحامي",
   });
 }
+export async function getLawyersCount(req, res) {
+  const result = await db.query(
+    `SELECT COUNT(*) 
+     FROM lawyers l
+     JOIN users u ON l.user_id = u.id
+     WHERE u.status = 'active'
+     AND l.verified = TRUE`
+  );
 
+  res.json({
+    count: result.rows[0].count
+  });
+}
 export { getLawyerIdOf };

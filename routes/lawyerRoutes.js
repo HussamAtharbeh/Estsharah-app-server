@@ -10,6 +10,7 @@ import {
   suspendLawyer,
   activateLawyer,
   deleteLawyer,
+  getLawyersCount,
 } from "../controllers/lawyerController.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
@@ -30,6 +31,8 @@ router.put("/:id/suspend", authMiddleware, roleMiddleware("admin"), asyncHandler
 router.put("/:id/activate", authMiddleware, roleMiddleware("admin"), asyncHandler(activateLawyer));
 router.delete("/:id", authMiddleware, roleMiddleware("admin"), asyncHandler(deleteLawyer));
 
+// Public browsing
+router.get("/count", asyncHandler(getLawyersCount)); 
 router.get("/", asyncHandler(getAllLawyers));
 router.get("/:id", asyncHandler(getLawyerById));
 
