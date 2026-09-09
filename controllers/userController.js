@@ -15,10 +15,10 @@ export async function getMyProfile(req, res) {
   res.json(result.rows[0]);
 }
 
-
 export async function updateMyProfile(req, res) {
   const { name, phone, city } = req.body;
 
+  
   const result = await db.query(
     `UPDATE users SET
        name  = COALESCE($1, name),
@@ -36,6 +36,7 @@ export async function updateMyProfile(req, res) {
   res.json(result.rows[0]);
 }
 
+
 export async function getAllClientsAdmin(req, res) {
   const result = await db.query(
     `SELECT u.id, u.name, u.email, u.phone, u.city, u.status, u.created_at,
@@ -49,6 +50,7 @@ export async function getAllClientsAdmin(req, res) {
 
   res.json(result.rows);
 }
+
 
 export async function suspendUser(req, res) {
   const result = await db.query(
@@ -79,6 +81,7 @@ export async function activateUser(req, res) {
 
   res.json(result.rows[0]);
 }
+
 
 export async function deleteUser(req, res) {
   if (Number(req.params.id) === req.user.id) {
