@@ -10,7 +10,7 @@ import lawyerRoutes from "./routes/lawyerRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import consultationRoutes from "./routes/consultationRoutes.js";
 import complaintRoutes from "./routes/complaintRoutes.js";
-
+import newsRoutes from "./routes/newsRoutes.js";
 import { notFound } from "./middleware/notFound.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
@@ -40,6 +40,7 @@ app.use("/api/lawyers", lawyerRoutes);
 app.use("/api/consultations", consultationRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/complaints", complaintRoutes);
+app.use("/api/news", newsRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -56,4 +57,3 @@ db.connect()
     console.error("Failed to connect to the database", err);
     process.exit(1);
   });
-  
