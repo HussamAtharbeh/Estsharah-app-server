@@ -48,11 +48,12 @@ db.connect()
   .then(() => {
     console.log("Connected to PostgreSQL");
 
-    app.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
     });
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);
     process.exit(1);
   });
+  
